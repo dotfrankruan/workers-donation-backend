@@ -1,23 +1,51 @@
 // src/index.js
 
-// Expected Environment Variables (Secrets):
-// - STRIPE_SECRET_KEY
-// - STRIPE_WEBHOOK_SECRET
-// - TELEGRAM_BOT_TOKEN
-// - TELEGRAM_CHAT_ID
-// - KV Namespace Binding: DONATION_TRACKER_KV
-
-export default {
-	async fetch(request, env, ctx) {
-	  const url = new URL(request.url);
-	  if (url.pathname === '/create-checkout-session' && request.method === 'POST') {
-		return createCheckoutSession(request, env);
-	  } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
-		return handleStripeWebhook(request, env);
-	  }
-	  return new Response('Not Found.', { status: 404 });
-	},
+// --- CORS Configuration ---
+// This allows your frontend at https://donate.frank-ruan.com to make requests to this worker.
+const corsHeaders = {
+	'Access-Control-Allow-Headers': 'Content-Type',
+	'Access-Control-Allow-Methods': 'POST, OPTIONS',
+	'Access-Control-Allow-Origin': 'https://donate.frank-ruan.com',
   };
+  
+  // --- Main Handler ---
+  // It now includes logic to handle CORS preflight requests and add headers to responses.
+  export default {
+	async fetch(request, env, ctx) {
+	  // Handle CORS preflight requests (the browser sends this automatically)
+	  if (request.method === 'OPTIONS') {
+		return new Response(null, { headers: corsHeaders });
+	  }
+  
+	  // Handle the actual request
+	  let response;
+	  const url = new URL(request.url);
+  
+	  if (url.pathname === '/create-checkout-session' && request.method === 'POST') {
+		response = await createCheckoutSession(request, env);
+	  } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
+		// Webhooks from Stripe are server-to-server and don't need CORS headers
+		return handleStripeWebhook(request, env);
+	  } else {
+		response = new Response('Not Found.', { status: 404 });
+	  }
+  
+	  // Add CORS headers to the response going back to the browser
+	  const responseHeaders = new Headers(response.headers);
+	  Object.entries(corsHeaders).forEach(([key, value]) => {
+		responseHeaders.set(key, value);
+	  });
+  
+	  return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: responseHeaders,
+	  });
+	}
+  };
+  
+  
+  // --- Application Logic (Unchanged from before) ---
   
   async function createCheckoutSession(request, env) {
 	try {
@@ -40,8 +68,6 @@ export default {
 		'cancel_url': cancelUrl,
 	  });
   
-	  // Add note to metadata IF it exists.
-	  // This attaches it to the Payment Intent, which is visible on the dashboard.
 	  if (note) {
 		body.append('payment_intent_data[metadata][donor_note]', note);
 	  }
@@ -76,7 +102,6 @@ export default {
 	const signature = request.headers.get('stripe-signature');
 	const rawBody = await request.text();
 	try {
-	  // Webhook signature verification
 	  const cryptoKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.STRIPE_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
 	  const [timestampPart, signedPayloadPart] = signature.split(',');
 	  const timestamp = timestampPart.split('=')[1];
@@ -93,7 +118,6 @@ export default {
 	  if (event.type === 'checkout.session.completed') {
 		const session = event.data.object;
 		
-		// Idempotency check using KV
 		const processedKey = `processed_session_${session.id}`;
 		const alreadyProcessed = await env.DONATION_TRACKER_KV.get(processedKey);
 		if (alreadyProcessed) {
@@ -114,7 +138,6 @@ export default {
 	}
   }
   
-  // Helper to retrieve the full Payment Intent object to access metadata
   async function retrievePaymentIntent(paymentIntentId, env) {
 	  if (!paymentIntentId) return null;
 	  const stripeResponse = await fetch(`https://api.stripe.com/v1/payment_intents/${paymentIntentId}`, {
@@ -127,20 +150,17 @@ export default {
 	  return stripeResponse.json();
   }
   
-  
   async function handleSuccessfulPayment(session, env) {
 	const amount = (session.amount_total / 100).toFixed(2);
 	const currency = session.currency.toUpperCase();
 	const donorEmail = session.customer_details?.email;
 	const transactionDate = new Date(session.created * 1000).toLocaleString('en-US', { timeZone: 'UTC' });
   
-	// Retrieve the full Payment Intent to get the note from metadata
 	const paymentIntent = await retrievePaymentIntent(session.payment_intent, env);
 	const donorNote = paymentIntent?.metadata?.donor_note || '';
   
 	console.log(`Processing successful payment for Telegram: PI ${paymentIntent?.id}`);
   
-	// Construct Telegram message
 	let telegramMessage = `🎉 *New Donation Received!* 🎉
   -----------------------------------
   *Amount:* ${amount} ${currency}
@@ -153,8 +173,6 @@ export default {
 	}
 	telegramMessage += `\n-----------------------------------`;
   
-  
-	// Send Telegram Notification
 	if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
 	  try {
 		await sendTelegramNotification(telegramMessage, env);
@@ -172,7 +190,7 @@ export default {
 	const payload = {
 	  chat_id: env.TELEGRAM_CHAT_ID,
 	  text: message,
-	  parse_mode: 'Markdown', // Using Markdown for bolding
+	  parse_mode: 'Markdown',
 	};
 	const response = await fetch(telegramApiUrl, {
 	  method: 'POST',
