@@ -1,36 +1,39 @@
 // src/index.js
 
+// Expected Environment Variables (Secrets):
+// - STRIPE_SECRET_KEY
+// - STRIPE_WEBHOOK_SECRET
+// - TELEGRAM_BOT_TOKEN
+// - TELEGRAM_CHAT_ID
+// - KV Namespace Binding: DONATION_TRACKER_KV
+
 // --- CORS Configuration ---
-// This allows your frontend at https://donate.frank-ruan.com to make requests to this worker.
 const corsHeaders = {
 	'Access-Control-Allow-Headers': 'Content-Type',
 	'Access-Control-Allow-Methods': 'POST, OPTIONS',
 	'Access-Control-Allow-Origin': 'https://donate.frank-ruan.com',
   };
   
-  // --- Main Handler ---
-  // It now includes logic to handle CORS preflight requests and add headers to responses.
+  
   export default {
 	async fetch(request, env, ctx) {
-	  // Handle CORS preflight requests (the browser sends this automatically)
+	  // Handle CORS preflight requests
 	  if (request.method === 'OPTIONS') {
 		return new Response(null, { headers: corsHeaders });
 	  }
   
-	  // Handle the actual request
 	  let response;
 	  const url = new URL(request.url);
   
 	  if (url.pathname === '/create-checkout-session' && request.method === 'POST') {
 		response = await createCheckoutSession(request, env);
 	  } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
-		// Webhooks from Stripe are server-to-server and don't need CORS headers
 		return handleStripeWebhook(request, env);
 	  } else {
 		response = new Response('Not Found.', { status: 404 });
 	  }
   
-	  // Add CORS headers to the response going back to the browser
+	  // Add CORS headers to the actual response
 	  const responseHeaders = new Headers(response.headers);
 	  Object.entries(corsHeaders).forEach(([key, value]) => {
 		responseHeaders.set(key, value);
@@ -44,9 +47,6 @@ const corsHeaders = {
 	}
   };
   
-  
-  // --- Application Logic (Unchanged from before) ---
-  
   async function createCheckoutSession(request, env) {
 	try {
 	  const { amount, currency, note, successUrl, cancelUrl } = await request.json();
@@ -58,7 +58,12 @@ const corsHeaders = {
   
 	  const unitAmount = parseInt(amount) * 100;
 	  const body = new URLSearchParams({
-		'payment_method_types[0]': 'card',
+		// --- FIX APPLIED HERE ---
+		// To enable dynamic payment methods from the Stripe Dashboard,
+		// we simply omit the `payment_method_types` parameter.
+		// Stripe will then automatically show all compatible methods.
+		// The incorrect `automatic_payment_methods[enabled]` parameter has been removed.
+  
 		'line_items[0][price_data][currency]': currency.toLowerCase(),
 		'line_items[0][price_data][product_data][name]': 'Support our work',
 		'line_items[0][price_data][unit_amount]': unitAmount,
@@ -97,6 +102,9 @@ const corsHeaders = {
 	  });
 	}
   }
+  
+  // The rest of the file (handleStripeWebhook, handleSuccessfulPayment, etc.)
+  // remains exactly the same as the previous version.
   
   async function handleStripeWebhook(request, env) {
 	const signature = request.headers.get('stripe-signature');
