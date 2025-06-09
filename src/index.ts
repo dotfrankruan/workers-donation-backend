@@ -60,7 +60,7 @@ const corsHeaders = {
 	  const body = new URLSearchParams({
 		'payment_method_types[0]': 'card',
 		'line_items[0][price_data][currency]': currency.toLowerCase(),
-		'line_items[0][price_data][product_data][name]': 'Donation',
+		'line_items[0][price_data][product_data][name]': 'Support our work',
 		'line_items[0][price_data][unit_amount]': unitAmount,
 		'line_items[0][quantity]': 1,
 		'mode': 'payment',
