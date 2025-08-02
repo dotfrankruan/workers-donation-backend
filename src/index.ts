@@ -56,7 +56,7 @@ const corsHeaders = {
 		});
 	  }
   
-	  const unitAmount = parseInt(amount) * 100;
+	  const unitAmount = parseFloat(amount) * 100;
 	  const body = new URLSearchParams({
 		// --- FIX APPLIED HERE ---
 		// To enable dynamic payment methods from the Stripe Dashboard,
@@ -146,6 +146,14 @@ const corsHeaders = {
 	}
   }
   
+  function escapeMarkdownV2(text) {
+	if (typeof text !== 'string') {
+	  return text;
+	}
+	// Escape characters for Telegram MarkdownV2
+	return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  }
+  
   async function retrievePaymentIntent(paymentIntentId, env) {
 	  if (!paymentIntentId) return null;
 	  const stripeResponse = await fetch(`https://api.stripe.com/v1/payment_intents/${paymentIntentId}`, {
@@ -169,17 +177,24 @@ const corsHeaders = {
   
 	console.log(`Processing successful payment for Telegram: PI ${paymentIntent?.id}`);
   
-	let telegramMessage = `🎉 *New Donation Received!* 🎉
-  -----------------------------------
-  *Amount:* ${amount} ${currency}
-  *Donor Email:* ${donorEmail || 'Not provided'}
-  *Time (UTC):* ${transactionDate}
-  *Payment ID:* ${paymentIntent?.id || session.id}`;
+	const safeAmount = escapeMarkdownV2(amount);
+	const safeCurrency = escapeMarkdownV2(currency);
+	const safeEmail = escapeMarkdownV2(donorEmail) || 'Not provided';
+	const safeDate = escapeMarkdownV2(transactionDate);
+	const safePaymentId = escapeMarkdownV2(paymentIntent?.id || session.id);
+	const safeNote = escapeMarkdownV2(donorNote);
+  
+	let telegramMessage = `🎉 *New Donation Received\\!* 🎉
+\\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\-
+*Amount:* ${safeAmount} ${safeCurrency}
+*Donor Email:* ${safeEmail}
+*Time \\(UTC\\):* ${safeDate}
+*Payment ID:* ${safePaymentId}`;
   
 	if (donorNote) {
-	  telegramMessage += `\n*Note from Donor:* ${donorNote}`;
+	  telegramMessage += `\n*Note from Donor:* ${safeNote}`;
 	}
-	telegramMessage += `\n-----------------------------------`;
+	telegramMessage += `\n\\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\- \\-`;
   
 	if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
 	  try {
@@ -198,7 +213,7 @@ const corsHeaders = {
 	const payload = {
 	  chat_id: env.TELEGRAM_CHAT_ID,
 	  text: message,
-	  parse_mode: 'Markdown',
+	  parse_mode: 'MarkdownV2',
 	};
 	const response = await fetch(telegramApiUrl, {
 	  method: 'POST',
@@ -220,4 +235,3 @@ const corsHeaders = {
 	}
 	return bytes.buffer;
   }
-  
